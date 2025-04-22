@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Add this import for User class
+import 'package:google_fonts/google_fonts.dart'; // Add this import for GoogleFonts
+import 'firebase_options.dart';
+import 'package:provider/provider.dart';
+import 'services/auth_service.dart';
+import 'screens/login_page.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }
 
@@ -10,17 +18,42 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Wonders of the World',
-      home: MyHomePage(),
-      theme: ThemeData(primarySwatch: Colors.blue),
+    return MultiProvider(
+      providers: [
+        Provider<AuthService>(create: (_) => AuthService()),
+        StreamProvider(
+          create: (context) => context.read<AuthService>().authStateChanges,
+          initialData: null,
+        ),
+      ],
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Wonders of the World',
+        home: AuthWrapper(),
+        theme: ThemeData(primarySwatch: Colors.blue),
+      ),
     );
   }
 }
 
+class AuthWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = Provider.of<User?>(context);
+
+    // Return home or login screen based on auth state
+    if (user != null) {
+      return MyHomePage();
+    } else {
+      return LoginPage();
+    }
+  }
+}
+
 class MyHomePage extends StatefulWidget {
+  // Remove const keyword since we need to initialize state
   const MyHomePage({Key? key}) : super(key: key);
+
   @override
   _MyHomePageState createState() => _MyHomePageState();
 }
@@ -53,6 +86,8 @@ class _MyHomePageState extends State<MyHomePage>
 
   @override
   Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context);
+
     return Scaffold(
       appBar: AppBar(
         flexibleSpace: Stack(
@@ -101,6 +136,15 @@ class _MyHomePageState extends State<MyHomePage>
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.exit_to_app),
+            onPressed: () async {
+              await authService.signOut();
+            },
+            tooltip: 'Sign Out',
+          ),
+        ],
       ),
       body: Center(
         child: Container(
@@ -112,6 +156,26 @@ class _MyHomePageState extends State<MyHomePage>
               ],
               radius: 3.0,
               center: Alignment(-2.0, -1.0),
+            ),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  "Welcome to Wonders of the World!",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 20),
+                Text(
+                  "You are signed in as: ${authService.currentUser?.email}",
+                  style: TextStyle(fontSize: 16, color: Colors.white),
+                ),
+              ],
             ),
           ),
         ),
