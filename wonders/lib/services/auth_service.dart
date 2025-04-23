@@ -1,9 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_model.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Get current user
   User? get currentUser => _auth.currentUser;
@@ -11,16 +14,64 @@ class AuthService {
   // Auth state changes stream
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
+  // Get user data from Firestore
+  Future<UserModel?> getUserData() async {
+    if (currentUser == null) return null;
+
+    DocumentSnapshot doc =
+        await _firestore.collection('users').doc(currentUser!.uid).get();
+
+    if (doc.exists) {
+      return UserModel.fromJson(doc.data() as Map<String, dynamic>);
+    } else {
+      // Create basic user if not exists
+      final userModel = UserModel(
+        uid: currentUser!.uid,
+        email: currentUser!.email ?? '',
+      );
+      await _firestore
+          .collection('users')
+          .doc(currentUser!.uid)
+          .set(userModel.toJson());
+      return userModel;
+    }
+  }
+
+  // Update user profile
+  Future<void> updateUserProfile({
+    String? name,
+    String? gender,
+    DateTime? dateOfBirth,
+    String? wonder,
+  }) async {
+    if (currentUser == null) return;
+
+    Map<String, dynamic> data = {};
+    if (name != null) data['name'] = name;
+    if (gender != null) data['gender'] = gender;
+    if (dateOfBirth != null) {
+      data['dateOfBirth'] = dateOfBirth.millisecondsSinceEpoch;
+    }
+    if (wonder != null) data['wonder'] = wonder;
+
+    await _firestore.collection('users').doc(currentUser!.uid).update(data);
+  }
+
   // Sign in with email & password
   Future<UserCredential> signInWithEmailPassword(
     String email,
     String password,
   ) async {
     try {
-      return await _auth.signInWithEmailAndPassword(
+      UserCredential result = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      // Check if user exists in Firestore, create if not
+      await _checkUserInFirestore(result.user!);
+
+      return result;
     } on FirebaseAuthException catch (e) {
       throw e.message ?? 'Sign in failed';
     }
@@ -32,10 +83,15 @@ class AuthService {
     String password,
   ) async {
     try {
-      return await _auth.createUserWithEmailAndPassword(
+      UserCredential result = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      // Create new user in Firestore
+      await _createUserInFirestore(result.user!);
+
+      return result;
     } on FirebaseAuthException catch (e) {
       throw e.message ?? 'Registration failed';
     }
@@ -48,7 +104,6 @@ class AuthService {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
 
       if (googleUser == null) {
-        // User canceled the sign-in flow
         return null;
       }
 
@@ -63,12 +118,31 @@ class AuthService {
       );
 
       // Sign in to Firebase with the Google credential
-      return await _auth.signInWithCredential(credential);
-    } on FirebaseAuthException catch (e) {
-      throw e.message ?? 'Google sign in failed';
+      UserCredential result = await _auth.signInWithCredential(credential);
+
+      // Check if user exists in Firestore, create if not
+      await _checkUserInFirestore(result.user!);
+
+      return result;
     } catch (e) {
-      throw 'An error occurred during Google sign in';
+      throw 'Google sign in failed: $e';
     }
+  }
+
+  // Check if user exists in Firestore and create if not
+  Future<void> _checkUserInFirestore(User user) async {
+    DocumentSnapshot doc =
+        await _firestore.collection('users').doc(user.uid).get();
+    if (!doc.exists) {
+      await _createUserInFirestore(user);
+    }
+  }
+
+  // Create new user document in Firestore
+  Future<void> _createUserInFirestore(User user) async {
+    UserModel userModel = UserModel(uid: user.uid, email: user.email ?? '');
+
+    await _firestore.collection('users').doc(user.uid).set(userModel.toJson());
   }
 
   // Sign out
